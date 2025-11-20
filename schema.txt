@@ -1,0 +1,6 @@
+account-book-api/
+├─ main.py          # FastAPI 入口
+├─ database.py      # 資料庫連線設定
+├─ models.py        # SQLAlchemy 資料表
+├─ schemas.py       # Pydantic 資料驗證用
+├─ requirements.txt # 需要安裝的套件
