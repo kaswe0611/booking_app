@@ -70,6 +70,35 @@ def create_transaction(tx: schemas.TransactionCreate, db: Session = Depends(get_
     db.refresh(db_tx)
     return db_tx
 
+# ======== GET /api/transactions ========
+@app.get("/api/transactions", response_model=List[schemas.TransactionRead])
+def list_transactions(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    category_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    取得交易明細列表：
+    - 可用 start_date / end_date 篩日期
+    - 可用 category_id 篩分類
+    - 預設全部資料（照日期+id 由新到舊）
+    """
+    query = db.query(models.Transaction)
+
+    if start_date is not None:
+        query = query.filter(models.Transaction.date >= start_date)
+
+    if end_date is not None:
+        query = query.filter(models.Transaction.date <= end_date)
+
+    if category_id is not None:
+        query = query.filter(models.Transaction.category_id == category_id)
+
+    # 照日期由新到舊，如果同一天就照 id 由新到舊
+    query = query.order_by(models.Transaction.date.desc(), models.Transaction.id.desc())
+
+    return query.all()
 
 # ======== Summary API ========
 
