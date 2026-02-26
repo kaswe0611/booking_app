@@ -3,19 +3,24 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
+from dateutil.relativedelta import relativedelta # 需要安裝 python-dateutil
 
 from database import SessionLocal, engine, Base
 import models
 import schemas
+from schemas import CategorySummary # 確保這個 Schema 已經定義在 schemas.py 中
 
-# 建立資料表
+
+# 建立資料表 (重要：如果 models.py 變了，請刪除 account_book.db 後再運行)
+# 確保您已經在 models.py, schemas.py 中更新了所有新欄位！
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Account Book API",
-    description="Step 1: 分類 + 時間區間 + 金額總和",
-    version="0.1.0"
+    # 💡 建議更新版本號和描述，反映新功能
+    description="Step 2: 儀表板、預算、付款方式與週期交易",
+    version="0.2.0"
 )
 
 
@@ -29,7 +34,7 @@ def get_db():
         db.close()
 
 
-# ======== Category APIs ========
+# ======== Category APIs (已更新) ========
 
 @app.post("/api/categories", response_model=schemas.CategoryRead)
 def create_category(category: schemas.CategoryCreate, db: Session = Depends(get_db)):
@@ -38,7 +43,13 @@ def create_category(category: schemas.CategoryCreate, db: Session = Depends(get_
     if existing:
         raise HTTPException(status_code=400, detail="Category already exists")
 
-    db_category = models.Category(name=category.name)
+    # ✅ 修正：傳入所有新的欄位
+    db_category = models.Category(
+        name=category.name,
+        icon_name=category.icon_name,
+        color_code=category.color_code,
+        monthly_budget=category.monthly_budget
+    )
     db.add(db_category)
     db.commit()
     db.refresh(db_category)
@@ -47,10 +58,11 @@ def create_category(category: schemas.CategoryCreate, db: Session = Depends(get_
 
 @app.get("/api/categories", response_model=List[schemas.CategoryRead])
 def get_categories(db: Session = Depends(get_db)):
+    # 查詢並回傳所有分類
     return db.query(models.Category).all()
 
 
-# ======== Transaction APIs ========
+# ======== Transaction APIs (已更新) ========
 
 @app.post("/api/transactions", response_model=schemas.TransactionRead)
 def create_transaction(tx: schemas.TransactionCreate, db: Session = Depends(get_db)):
@@ -59,19 +71,52 @@ def create_transaction(tx: schemas.TransactionCreate, db: Session = Depends(get_
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
+    # ✅ 修正：傳入所有新的欄位
     db_tx = models.Transaction(
         date=tx.date,
         category_id=tx.category_id,
         amount=tx.amount,
-        note=tx.note
+        note=tx.note,
+        merchant=tx.merchant,
+        payment_method=tx.payment_method,      # 新欄位
+        is_recurring=tx.is_recurring           # 新欄位
     )
     db.add(db_tx)
     db.commit()
     db.refresh(db_tx)
     return db_tx
 
+# ======== GET /api/transactions (不變) ========
+@app.get("/api/transactions", response_model=List[schemas.TransactionRead])
+def list_transactions(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    category_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    取得交易明細列表：
+    - 可用 start_date / end_date 篩日期
+    - 可用 category_id 篩分類
+    - 預設全部資料（照日期+id 由新到舊）
+    """
+    query = db.query(models.Transaction)
 
-# ======== Summary API ========
+    if start_date is not None:
+        query = query.filter(models.Transaction.date >= start_date)
+
+    if end_date is not None:
+        query = query.filter(models.Transaction.date <= end_date)
+
+    if category_id is not None:
+        query = query.filter(models.Transaction.category_id == category_id)
+
+    # 照日期由新到舊，如果同一天就照 id 由新到舊
+    query = query.order_by(models.Transaction.date.desc(), models.Transaction.id.desc())
+
+    return query.all()
+
+# ======== Summary API (不變) ========
 
 @app.get("/api/summary", response_model=schemas.SummaryResponse)
 def get_summary(
@@ -113,13 +158,53 @@ def get_summary(
         category_name=category_name
     )
 
+# ======== Dashboard Summary API (已新增) ========
 
-# main.py（FastAPI 主程式 + API endpoints）
+@app.get("/api/dashboard/monthly_summary", response_model=List[CategorySummary])
+def get_monthly_dashboard_summary(
+    db: Session = Depends(get_db)
+):
+    """
+    取得所有分類在當前月份的總支出與預算資訊，用於主頁儀表板。
+    """
+    today = date.today()
+    # 取得當月的第一天
+    start_of_month = today.replace(day=1) 
+    # 取得下月的第一天，作為結束日期 (不包含)
+    end_of_month = start_of_month + relativedelta(months=1)
 
-# POST /categories：新增分類
+    # 查詢當月所有交易，按 category_id 分組並計算總和
+    summary_query = (
+        db.query(
+            models.Transaction.category_id,
+            func.sum(models.Transaction.amount).label("total_spent")
+        )
+        .filter(models.Transaction.date >= start_of_month)
+        .filter(models.Transaction.date < end_of_month)
+        .group_by(models.Transaction.category_id)
+    )
+    
+    spent_data = summary_query.all()
+    
+    # 將總支出資料轉換為 {category_id: total_spent} 字典，方便查詢
+    spent_map = {item.category_id: item.total_spent for item in spent_data}
+    
+    # 取得所有分類資訊
+    categories = db.query(models.Category).all()
 
-# GET /categories：取得所有分類
-
-# POST /transactions：新增收支紀錄
-
-# GET /summary：給一段日期（可選分類），算總金額
+    response_list = []
+    for category in categories:
+        total_spent = spent_map.get(category.id, 0)
+        
+        # 建立回覆物件，將 SQLAlchemy model 轉換為 Pydantic schema
+        summary_data = CategorySummary(
+            id=category.id,
+            name=category.name,
+            icon_name=category.icon_name,
+            color_code=category.color_code,
+            monthly_budget=category.monthly_budget,
+            total_spent=total_spent
+        )
+        response_list.append(summary_data)
+        
+    return response_list

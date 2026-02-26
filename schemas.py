@@ -8,7 +8,9 @@ from pydantic import BaseModel
 
 class CategoryBase(BaseModel):
     name: str
-
+    icon_name: Optional[str] = "default_icon"
+    color_code: Optional[str] = "#CCCCCC"
+    monthly_budget: Optional[int] = 0
 
 class CategoryCreate(CategoryBase):
     pass
@@ -28,6 +30,10 @@ class TransactionBase(BaseModel):
     category_id: int
     amount: int
     note: Optional[str] = None
+    merchant: Optional[str] = None
+
+    payment_method: Optional[str] = None
+    is_recurring: Optional[bool] = False
 
 
 class TransactionCreate(TransactionBase):
@@ -50,4 +56,9 @@ class SummaryResponse(BaseModel):
     category_id: Optional[int] = None
     category_name: Optional[str] = None
 
+
+class CategorySummary(CategoryRead):
+    """繼承 CategoryRead，並新增本期總支出"""
+    total_spent: int
+    
 # schemas.py（Pydantic：定義 API 用的資料格式）
